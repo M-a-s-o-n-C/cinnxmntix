@@ -1,0 +1,44 @@
+cinnxmn Tickets v2 — QUICK START
+=================================
+
+1. Upload:
+   main.py
+   database.py
+   requirements.txt
+
+2. Set startup Python file:
+   main.py
+
+3. Environment:
+   DISCORD_TOKEN = your bot token
+   GUILD_ID = cinnxmn server ID
+   BOT_BRAND = cinnxmn
+
+4. Discord Developer Portal:
+   Enable MESSAGE CONTENT INTENT
+
+5. Start bot.
+
+6. In Discord:
+   /setup
+
+7. Add categories:
+   /category-add
+   /category-list
+
+8. Customize:
+   /appearance
+   /accessibility
+   /automation
+   /form-customize
+
+9. Make panel:
+   /panel-create
+   category_ids: 1,2,3
+
+There is NO /ticket prefix in v2.
+
+IMPORTANT:
+- Keep tickets.db. v2 migrates the original database automatically.
+- Staff-role members cannot see tickets until individually claimed.
+- Discord Administrators always bypass channel visibility restrictions.

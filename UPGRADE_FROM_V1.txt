@@ -1,0 +1,33 @@
+UPGRADING FROM CINNXMN v1
+=========================
+
+1. STOP the bot.
+2. Download/back up tickets.db.
+3. Replace main.py and database.py with the v2 files.
+4. Replace requirements.txt.
+5. Keep your existing tickets.db.
+6. Start the bot.
+
+v2 automatically adds its new SQLite columns/tables.
+
+Slash commands no longer use the /ticket prefix.
+
+Examples:
+OLD: /ticket setup
+NEW: /setup
+
+OLD: /ticket close
+NEW: /close
+
+OLD: /ticket category-add
+NEW: /category-add
+
+OLD: /panel multi
+NEW: /panel-create
+
+After startup, run /settings and then use:
+/appearance
+/accessibility
+/automation
+
+to configure the new v2 options.
