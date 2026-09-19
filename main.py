@@ -137,9 +137,13 @@ async def safe_ephemeral(interaction: discord.Interaction, content=None, *, embe
         kwargs["file"] = file
     if view is not None:
         kwargs["view"] = view
-    if interaction.response.is_done():
-        return await interaction.followup.send(**kwargs)
-    return await interaction.response.send_message(**kwargs)
+    try:
+        if interaction.response.is_done():
+            return await interaction.followup.send(**kwargs)
+        return await interaction.response.send_message(**kwargs)
+    except discord.NotFound:
+        log.warning("Interaction expired before response could be sent: %s", interaction.id)
+        return None
 
 
 async def require_ticket(interaction: discord.Interaction):
@@ -363,6 +367,8 @@ async def do_claim(interaction: discord.Interaction, ticket_id: int):
     if ticket["claimed_by"]:
         return await safe_ephemeral(interaction, f"This ticket is already claimed by <@{ticket['claimed_by']}>.")
 
+    await interaction.response.defer(ephemeral=True)
+
     if not await db.claim(ticket_id, interaction.user.id):
         fresh = await db.ticket(ticket_id)
         who = f"<@{fresh['claimed_by']}>" if fresh and fresh["claimed_by"] else "another staff member"
@@ -407,6 +413,8 @@ async def do_unclaim(interaction: discord.Interaction, ticket_id: int):
     if ticket["claimed_by"] != interaction.user.id and not override:
         return await safe_ephemeral(interaction, "Only the current claimer or a server manager can unclaim this ticket.")
 
+    await interaction.response.defer(ephemeral=True)
+
     old_id = ticket["claimed_by"]
     if not await db.unclaim(ticket_id, None if override else interaction.user.id):
         return await safe_ephemeral(interaction, "The ticket changed before I could update it.")
@@ -446,6 +454,8 @@ async def do_transfer(interaction: discord.Interaction, ticket_id: int, target: 
         return await safe_ephemeral(interaction, "Only authorized staff can transfer tickets.")
     if not is_staff(target, cfg, ticket):
         return await safe_ephemeral(interaction, "That member is not part of the staff team for this ticket type.")
+
+    await interaction.response.defer(ephemeral=True)
 
     old_id = ticket["claimed_by"]
     channel = interaction.guild.get_channel(ticket["channel_id"])
@@ -497,8 +507,13 @@ async def send_close_dm(user, ticket, cfg, closer: discord.Member, reason: str, 
         files.append(discord.File(io.BytesIO(transcript), filename=f"{cfg['brand_name']}-ticket-{ticket['id']:04d}.html"))
     try:
         await user.send(embed=embed, files=files)
+        log.info("Close DM delivered for ticket %s to user %s", ticket["id"], user.id)
         return True
-    except (discord.Forbidden, discord.HTTPException):
+    except discord.Forbidden as exc:
+        log.warning("Close DM forbidden for ticket %s to user %s: %s", ticket["id"], user.id, exc)
+        return False
+    except discord.HTTPException as exc:
+        log.warning("Close DM HTTP error for ticket %s to user %s: %s", ticket["id"], user.id, exc)
         return False
 
 
@@ -530,6 +545,13 @@ async def do_close(interaction: discord.Interaction, ticket_id: int, reason: str
     await db.audit(interaction.guild.id, "closed", ticket_id, interaction.user.id, reason)
 
     opener = interaction.guild.get_member(ticket["opener_id"]) or interaction.client.get_user(ticket["opener_id"])
+    if opener is None:
+        try:
+            opener = await interaction.client.fetch_user(ticket["opener_id"])
+        except discord.HTTPException as exc:
+            log.warning("Could not fetch opener %s for close DM: %s", ticket["opener_id"], exc)
+            opener = None
+
     dm_ok = await send_close_dm(opener, ticket, cfg, interaction.user, reason, transcript) if opener else False
 
     log_channel = interaction.guild.get_channel(cfg["log_channel_id"]) if cfg["log_channel_id"] else None
@@ -1784,6 +1806,28 @@ class TicketCog(commands.Cog):
             ephemeral=True,
         )
 
+    @app_commands.command(name="dm-test", description="Send yourself a test DM to verify bot DM delivery.")
+    async def dm_test(self, interaction: discord.Interaction):
+        cfg = await db.config(interaction.guild_id)
+        e = make_embed(
+            cfg,
+            decor(cfg, "🍪", f"{cfg['brand_name']} DM test"),
+            f"{separator(cfg, 'DM delivery test')}\n\n"
+            "If you can read this, direct messages from the ticket bot are working.",
+            color=cfg["primary_color"],
+        )
+        try:
+            await interaction.user.send(embed=e)
+            await safe_ephemeral(interaction, "Test DM sent successfully.")
+        except discord.Forbidden:
+            await safe_ephemeral(
+                interaction,
+                "Discord rejected the DM. Check server privacy settings and whether the bot is blocked."
+            )
+        except discord.HTTPException as exc:
+            log.warning("DM test failed for user %s: %s", interaction.user.id, exc)
+            await safe_ephemeral(interaction, f"Discord returned an error while sending the DM: `{exc}`")
+
     @app_commands.command(name="help", description="Show the ticket bot command guide.")
     async def help_cmd(self, interaction: discord.Interaction):
         cfg = await db.config(interaction.guild_id)
@@ -1794,7 +1838,7 @@ class TicketCog(commands.Cog):
         )
         e.add_field(
             name="Customer",
-            value="`/my-tickets` • `/info` • `/transcript` • `/close`",
+            value="`/my-tickets` • `/info` • `/transcript` • `/close` • `/dm-test`",
             inline=False,
         )
         e.add_field(
